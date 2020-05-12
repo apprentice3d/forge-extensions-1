@@ -19,6 +19,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // TurnTable extension illustrating camera rotation around the model
 // by Denis Grigor, November 2018
+// updated May 2020
 //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -29,16 +30,24 @@ class TurnTableExtension extends Autodesk.Viewing.Extension {
         this._group = null;
         this._button = null;
         this.customize = this.customize.bind(this);
+
+        this.target_controller = null;
+        this.camera_controller = null;
+        this.camera = null;
+        this.started = false;
+
+        this.updateCameraAndTarget = this.updateCameraAndTarget.bind(this);
     }
 
     load() {
         if (this.viewer.model.getInstanceTree()) {
             this.customize();
         } else {
-            this.viewer.addEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, this.customize());
-        }        
+            this.viewer.addEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, this.customize);
+        }
         return true;
     }
+
     unload() {
         console.log('TurnTableExtension is now unloaded!');
         // Clean our UI elements if we added any
@@ -48,6 +57,10 @@ class TurnTableExtension extends Autodesk.Viewing.Extension {
                 this.viewer.toolbar.removeControl(this._group);
             }
         }
+
+        this.viewer.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, this.updateCameraAndTarget);
+        this.viewer.overlays.removeMesh(this.target_controller, "reference");
+        this.viewer.overlays.removeScene("reference");
         return true;
     }
 
@@ -64,33 +77,61 @@ class TurnTableExtension extends Autodesk.Viewing.Extension {
         this._group.addControl(this._button);
         this.viewer.toolbar.addControl(this._group);
 
-        let started = false;
+        let needsUpdate = true;
+        let started = this.started;
+        this.camera = viewer.getCamera();
+
+        this.target_controller = new THREE.Mesh();
+        this.camera_controller = new THREE.Mesh();
+
+        this.target_controller.add(this.camera_controller);
+        viewer.overlays.addScene("reference");
+        viewer.overlays.addMesh(this.target_controller, "reference");
+
+        viewer.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, this.updateCameraAndTarget);
+
 
         let rotateCamera = () => {
+            if (needsUpdate) {
+                needsUpdate = false;
+                console.log("updated once");
+                this.updateCameraAndTarget();
+            }
             if (started) {
                 requestAnimationFrame(rotateCamera);
             }
+            const speed = Math.PI / 180;
+            this.target_controller.rotateZ(speed);
+            let updated_camera_target = this.target_controller.getWorldPosition();
+            let updated_camera_position = this.camera_controller.getWorldPosition();
 
-            const nav = viewer.navigation;
-            const up = nav.getCameraUpVector();
-            const axis = new THREE.Vector3(0, 0, 1);
-            const speed = 10.0 * Math.PI / 180;
-            const matrix = new THREE.Matrix4().makeRotationAxis(axis, speed * 0.1);
-
-            let pos = nav.getPosition();
-            pos.applyMatrix4(matrix);
-            up.applyMatrix4(matrix);
-            nav.setView(pos, new THREE.Vector3(0, 0, 0));
-            nav.setCameraUpVector(up);
-            var viewState = viewer.getState();
-            // viewer.restoreState(viewState);
-
+            this.camera.position.set(updated_camera_position.x, updated_camera_position.y, updated_camera_position.z);
+            this.camera.lookAt(new THREE.Vector3(updated_camera_target.x, updated_camera_target.y, updated_camera_target.z));
+            this.camera.up.set(0, 0, 1);
+            this.viewer.impl.sceneUpdated(true);
         };
 
         this._button.onClick = function (e) {
             started = !started;
-            if (started) rotateCamera()
+            if (started) {
+                rotateCamera();
+            }
         };
+
+    }
+
+    updateCameraAndTarget() {
+
+
+        this.camera = viewer.getCamera();
+
+        this.target_controller.position.set(this.camera.target.x, this.camera.target.y, this.camera.target.z);
+
+        //TODO: Check the bug of camera jump when moving camera before triggering rotation play
+        this.camera_controller.position.set(
+            this.camera.position.x,
+            this.camera.position.y,
+            this.camera.position.z)
 
     }
 
